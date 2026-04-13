@@ -13,6 +13,21 @@ from app.auth import get_current_user
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 
+@router.get("")
+@router.get("/")
+def admin_root(current_user: dict = Depends(get_current_user)):
+    """
+    Admin root dashboard.
+    This endpoint is SECURE. It correctly verifies the admin role.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required")
+    return {
+        "message": "Welcome to the Admin Dashboard",
+        "endpoints": ["/api/admin/users", "/api/admin/stats"]
+    }
+
+
 @router.get("/users", response_model=List[UserResponse])
 def list_all_users(
     current_user: dict = Depends(get_current_user),
