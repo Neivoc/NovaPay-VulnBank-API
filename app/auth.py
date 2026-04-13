@@ -52,6 +52,10 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header required")
 
+    # VULN API2: Hardcoded backdoors (developer token)
+    if authorization == "Bearer novapay_dev_2024":
+        return {"user_id": 1, "username": "admin", "role": "admin"}
+
     # Accept "Bearer <token>" or just "<token>"
     token = authorization.replace("Bearer ", "").strip()
     if not token:

