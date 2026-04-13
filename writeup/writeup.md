@@ -254,46 +254,44 @@ done
 
 ## 6. 🚪 Broken Function Level Authorization — API5:2023
 
-**Qué es:** Endpoints de administración accesibles con cualquier token válido, sin verificar el rol.
+**Qué es:** El desarrollador aseguró correctamente algunos endpoints administrativos, pero **olvidó** agregar la verificación de rol en otros. Esos endpoints "olvidados" son accesibles con cualquier token válido.
 
-**Impacto bancario:** Un cliente puede listar, ver, y eliminar otros usuarios.
+**Impacto bancario:** Un atacante descubre la ruta olvidada y extrae información confidencial o realiza acciones administrativas.
 
 ### 🔍 Código vulnerable del backend
 
 ```python
 # app/routes/admin.py
+
+# ✅ EJEMPLO SEGURO — El desarrollador se acordó de evaluar el rol
 @router.get("/users")
-def list_all_users(current_user = Depends(get_current_user), db = ...):
-    # ❌ Solo verifica que exista un token válido
-    # FALTA:
-    # if current_user["role"] != "admin":
-    #     raise HTTPException(status_code=403, detail="Admin access required")
+def list_all_users(current_user = Depends(...) ...):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return db.query(User).all()
 
-    users = db.query(User).all()  # Retorna TODOS los usuarios
-    return users
-
-@router.delete("/users/{user_id}")
-def delete_user(user_id: int, current_user = Depends(get_current_user), db = ...):
-    # ❌ Misma falla — no verifica rol
-    user = db.query(User).filter(User.id == user_id).first()
-    db.delete(user)
-    db.commit()
-    return {"message": f"User {user.username} deleted"}
+# ❌ VULNERABILIDAD — El desarrollador olvidó copiar el "if" aquí
+@router.get("/stats")
+def get_system_stats(current_user = Depends(...) ...):
+    # ¡Cualquier token que pase Depends(get_current_user) entra directo!
+    return { "total_users": 5, "jwt_secret": "secret" ... }
 ```
 
 ### Explotación
 
 ```bash
-# Con token de alice (usuario regular), acceder al panel admin
-curl -s http://localhost:8080/api/admin/users \
-  -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'{len(d)} usuarios listados como admin')"
+# 1. Intentamos entrar al panel de usuarios con token de Alice (usuario regular)
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/admin/users \
+  -H "Authorization: Bearer $TOKEN"
+# → Responde "403" (Forbidden). ¡Parece que el sistema es seguro!
 
-# Ver estadísticas del sistema (¡incluye el JWT secret!)
+# 2. Sin embargo, no nos rendimos. Probamos la ruta oculta "stats" que olvidaron proteger:
 curl -s http://localhost:8080/api/admin/stats \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+# → Retorna HTTP 200 OK y muestra la clave secreta del JWT
 ```
 
-**Remediación:** Verificar `current_user["role"] == "admin"` en cada endpoint administrativo.
+**Remediación:** Usar un modelo de seguridad por defecto (ej. requerir Admin de forma global en todo el router `/api/admin` usando dependencias de FastAPI), en lugar de confiar en que el programador escribirá el `if` en cada función individual.
 
 ---
 

@@ -21,11 +21,11 @@ def list_all_users(
     """
     List all users (admin endpoint).
 
-    VULN API5:2023 — Broken Function Level Authorization:
-    Only checks that a valid token exists, does NOT verify user role is 'admin'.
-    Any authenticated user can access this admin endpoint.
+    This endpoint is SECURE. It correctly verifies the admin role.
     """
-    # VULN: No role check — should be: if current_user["role"] != "admin": raise 403
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required")
+
     users = db.query(User).all()
     return users
 
@@ -39,10 +39,11 @@ def delete_user(
     """
     Delete a user (admin endpoint).
 
-    VULN API5:2023 — Broken Function Level Authorization:
-    Same as above — no admin role verification.
+    This endpoint is SECURE. It correctly verifies the admin role.
     """
-    # VULN: No role check
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required")
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -60,7 +61,9 @@ def get_system_stats(
     """
     Get system statistics (admin endpoint).
 
-    VULN API5:2023 — No role check.
+    VULN API5:2023 — Broken Function Level Authorization:
+    The developer properly secured the /users endpoints but FORGOT to add
+    the role check here. Any authenticated user can access this!
     """
     from app.models import Account, Transaction
 
