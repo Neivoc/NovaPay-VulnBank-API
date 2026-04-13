@@ -21,15 +21,16 @@ def create_token(user_id: int, username: str, role: str) -> str:
 
 def decode_token(token: str) -> dict:
     """
-    VULN: Broken Authentication — accepts alg:none
-    A secure implementation would enforce the algorithm.
+    VULN: Broken Authentication — JWT Signature Bypass
+    A secure implementation would reject tokens with invalid signatures.
     """
     try:
         # First try normal decode
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM, "none"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.InvalidSignatureError:
-        # VULN: Try decoding without verification (accepts alg:none)
+        # VULN: Signature is invalid, but the server ignores the error
+        # and decodes the token anyway (Signature Bypass).
         try:
             payload = jwt.decode(token, options={"verify_signature": False}, algorithms=["HS256", "none"])
             return payload
